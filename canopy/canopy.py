@@ -15,6 +15,7 @@ import arcpy
 import os
 import sys
 import glob
+import math
 from .templates import config_template
 from configparser import ConfigParser
 import time
@@ -1130,6 +1131,167 @@ class Canopy:
         arcpy.SelectLayerByAttribute_management(naipqq_layer, 'CLEAR_SELECTION')
 
         print('Completed')
+
+    def objective_function(self, phy_id, nlcd, method="unweighted"):
+        '''
+        Method for objectively choosing a NAIP training tile based of NLCD data
+        which is representative for the physiographic district.
+
+        The objective minimazion function can be described as
+        +-----------------------------------------------------+
+        |  F=∑_{(j=1)}^n(G_j-L_{ij})^2 + w * (G/20-L_i/20)^2  |
+        +-----------------------------------------------------+
+        where G_j is the global (district-wide) percentage of land cover j,
+        L_ij is the local percentage of land cover j in tile I, L_i is the
+        number of classes in tile I and w is the weight for the number of
+        classes in the tile.
+        '''
+
+        phy_reg = self.phyregs_layer
+        naip = self.naipqq_layer
+
+        arcpy.env.overwriteOutput = True
+
+        # Select phsyio district
+        arcpy.SelectLayerByAttribute_management(phy_reg, "NEW_SELECTION",
+                                                f"PHYSIO_ID = {phy_id}", None)
+        # Select only NAIP tiles which are fully within the district
+        arcpy.SelectLayerByLocation_management(naip, "WITHIN", phy_reg, None,
+                                               "NEW_SELECTION", "NOT_INVERT")
+        # Create on disk subsection for selected QQ's. Would prefer for this
+        # to not be written to disk and instead use the in memory workspace, but
+        # I was getting very unreliable behavior when using the inmemory vector.
+        naip_sub = "./naip_subset.shp"
+        arcpy.FeatureClassToFeatureClass_conversion(naip,
+            os.path.dirname(naip_sub), os.path.basename(naip_sub))
+
+        # Create NLCD subset for entire district.
+        nlcd_region = arcpy.sa.ExtractByMask(nlcd, phy_reg)
+        # Convert to numpy array
+        region_arr = arcpy.RasterToNumPyArray(nlcd_region)
+        # Get global values and counts of lancover within district.
+        reg_unique, reg_counts = np.unique(region_arr, return_counts=True)
+        region_lc = dict(zip(reg_unique, reg_counts))
+        # Remove nodata
+        # TODO: Remove hardcoding
+        del region_lc[0]
+
+        # Get list of all naip tile names.
+        name_list = []
+        with arcpy.da.SearchCursor(naip, ['OBJECTID', 'FileName']) as cur:
+            for row in cur:
+                name_list.append(row[0])
+        # Choose between weighted or unweighted function.
+        if method == "unweighted":
+            self.__unweighted_ob(name_list, naip, nlcd_region, region_lc)
+        elif method == "weighted":
+            self.__weighted_ob(name_list, naip, nlcd_region, region_lc)
+        else:
+            raise ValueError("Not an option.")
+
+    def __unweighted_ob(self, name_list, naip, nlcd_region, region_lc):
+        '''
+        Removes weight which will penalize for missing classes. Reduces compute
+        time as it will remove class iterations.
+        '''
+        # Initialize dictonary for tile scores and id.
+        out_index = {}
+        for i in name_list:
+            # Selcect tile i
+            arcpy.SelectLayerByAttribute_management(naip, "NEW_SELECTION",
+                                                    f"OBJECTID = {i}")
+            # Get local NLCD
+            nlcd_tile = arcpy.sa.ExtractByMask(nlcd_region, naip)
+            # Convert to numpy array and get counts of values.
+            tile_arr = arcpy.RasterToNumPyArray(nlcd_tile)
+            tile_unique, tile_counts = np.unique(tile_arr, return_counts=True)
+            tile_lc = dict(zip(tile_unique, tile_counts))
+            # Remove nodata
+            # TODO: Remove hardcoding
+            del tile_lc[0]
+            # Compute minimization value.
+            d = []
+            for j in region_lc.keys():
+                # If class is not in local values then local value is 0.
+                if j not in tile_unique:
+                    G = region_lc.get(j) / sum(region_lc.values())
+                    c = (G - 0) ** 2
+                    d.append(c)
+                else:
+                    G = region_lc.get(j) / sum(region_lc.values())
+                    L = tile_lc.get(j) / sum(tile_lc.values())
+                    c = (G - L) ** 2
+                    d.append(c)
+            # For each class value it is added to list 'd' and then summed at
+            # the of each iteration.
+            out_index.update({i: math.fsum(d)})
+        self.training_tile = {k: v for k, v in sorted(out_index.items(),
+                                                      key=lambda item: item[1])}
+        print(self.training_tile)
+
+    def __weighted_ob(self, name_list, naip, nlcd_region, region_lc):
+        '''
+        Weighted function as described in docstring of self.objective_function.
+        Will have longer computational time as it will iterate over each tile 20
+        times.
+        '''
+        #######################################################################
+        # TODO:
+        # Is there a better way to iterate over the tiles in the weighted
+        # function? Maybe it would be best to take only the tiles which fall
+        # within a certain tolerance of the lowest tile after the first
+        # iteration? Doing that would reduce the amount of iterations from
+        # n * 20 to n + (n_{F \in [F_0, F_0 + t]} * 20)) where n is the number
+        # of tiles, F is the objective function value, and t is the tolerance
+        # value.
+        #######################################################################
+
+        # Initialize dictionary for all weighted tiles.
+        weighted_tiles = {}
+        # 20 iterations for 20 NLCD classes.
+        for weight in range(21):
+            # Index dictonary for iteration weight_i
+            out_index = {}
+            for i in sorted(name_list):
+                # Select tile i
+                arcpy.SelectLayerByAttribute_management(naip, "NEW_SELECTION",
+                                                        f"OBJECTID = {i}")
+                # Get local NLCD
+                nlcd_tile = arcpy.sa.ExtractByMask(nlcd_region, naip)
+                # Convert to numpy array and get counts of values.
+                tile_arr = arcpy.RasterToNumPyArray(nlcd_tile)
+                tile_unique, tile_counts = np.unique(tile_arr,
+                                                     return_counts=True)
+                tile_lc = dict(zip(tile_unique, tile_counts))
+                # Remove nodata
+                # TODO: Remove hardcoding
+                del tile_lc[0]
+                # Compute weighted minimization value
+                d = []
+                for j in region_lc.keys():
+                    if j in tile_unique:
+                        G = region_lc.get(j) / sum(region_lc.values())
+                        L = tile_lc.get(j) / sum(tile_lc.values())
+                        c = (G - L) ** 2 + weight * (len(region_lc) /
+                                                    20 - len(tile_lc) / 20) ** 2
+                        d.append(c)
+                    else:
+                        G = region_lc.get(j) / sum(region_lc.values())
+                        c = (G - 0) ** 2 + weight * (len(region_lc) /
+                                                    20 - len(tile_lc) / 20) ** 2
+                        d.append(c)
+
+                # For each class value it is added to list 'd' and then summed at
+                # the of each iteration.
+                out_index.update({i: math.fsum(d)})
+            # Sort out dictonary
+            sort_func = {k: v for k, v in sorted(out_index.items(),
+                                                     key=lambda item: item[1])}
+            # Add the tile with the lowest function value to a new list.
+            weighted_tiles.update({weight: [list(sort_func.items())[0][0],
+                                                list(sort_func.items())[0][1]]})
+        self.training_tile = weighted_tiles
+        print(self.training_tile)
 
 
 class Check_gaps:
