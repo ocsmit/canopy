@@ -5,7 +5,7 @@ from .templates import config_template
 from configparser import ConfigParser
 import time
 
-class Canopy:
+class Config:
     '''
     Object to effectively manage the configuration of CanoPy and run
     the processing functions created.

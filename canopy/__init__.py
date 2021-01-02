@@ -1,1 +1,2 @@
-from .canopy import Canopy
+from .canopy import *
+from .config import Config
