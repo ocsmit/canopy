@@ -931,8 +931,9 @@ def objective_function(config, phy_id, nlcd, method="unweighted"):
     reg_unique, reg_counts = np.unique(region_arr, return_counts=True)
     region_lc = dict(zip(reg_unique, reg_counts))
     # Remove nodata
-    # TODO: Remove hardcoding
-    del region_lc[0]
+    ras = arcpy.Raster(nlcd_region)
+    nan = ras.noDataValue
+    del region_lc[nan]
 
     # Get list of all naip tile names.
     name_list = []
@@ -965,8 +966,9 @@ def __unweighted_ob(name_list, naip, nlcd_region, region_lc):
         tile_unique, tile_counts = np.unique(tile_arr, return_counts=True)
         tile_lc = dict(zip(tile_unique, tile_counts))
         # Remove nodata
-        # TODO: Remove hardcoding
-        del tile_lc[0]
+        ras = arcpy.Raster(nlcd_tile)
+        nan = ras.noDataValue
+        del tile_lc[nan]
         # Compute minimization value.
         d = []
         for j in region_lc.keys():
@@ -1022,8 +1024,9 @@ def __weighted_ob(name_list, naip, nlcd_region, region_lc):
                                                  return_counts=True)
             tile_lc = dict(zip(tile_unique, tile_counts))
             # Remove nodata
-            # TODO: Remove hardcoding
-            del tile_lc[0]
+            ras = arcpy.Raster(nlcd_tile)
+            nan = ras.noDataValue
+            del tile_lc[nan]
             # Compute weighted minimization value
             d = []
             for j in region_lc.keys():
