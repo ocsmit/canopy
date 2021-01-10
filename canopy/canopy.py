@@ -13,6 +13,7 @@
 
 import arcpy
 import os
+import sys
 import glob
 import math
 from configparser import ConfigParser
@@ -219,7 +220,7 @@ def reproject_naip_tiles(config):
                     folder = filename[2:7]
                     infile_path = '%s/%s/%s' % (naip_path, folder, filename)
                     outfile_path = '%s/r%s' % (outdir_path, filename)
-                    config.__check_snap(infile_path)
+                    check_snap(infile_path, snaprast_path)
                     if not os.path.exists(outfile_path):
                         arcpy.ProjectRaster_management(infile_path,
                                 outfile_path, spatref)
@@ -296,10 +297,10 @@ def convert_afe_to_final_tiles(config):
                         arcpy.FeatureToRaster_conversion(rshpfile_path,
                                 'CLASS_ID', frtiffile_path)
                         # Compare output tif cell size to snap raster
-                        config.__check_snap(frtiffile_path)
+                        check_snap(frtiffile_path, snaprast_path)
                     elif os.path.exists(rtiffile_path):
                         # Compare input tif cell size to snap raster
-                        config.__check_snap(rtiffile_path)
+                        check_snap(rtiffile_path, snaprast_path)
                         arcpy.Reclassify_3d(rtiffile_path, 'Value',
                                             '1 0;2 1', frtiffile_path)
     # clear selection
@@ -1100,3 +1101,41 @@ class Check_gaps:
             if val_dict.get(self.nodata) <= 2:
                 print("Gaps are present in mosaic")
                 break
+
+class check_snap:
+
+    def __init__(self, input_raster, snaprast_path):
+        self.__check_snap(input_raster, snaprast_path)
+
+    def __get_cellsizes(self, input_raster):
+        # Returns a tuple of the x,y cell dimensions of raster
+        x = arcpy.Raster(input_raster).meanCellWidth
+        y = arcpy.Raster(input_raster).meanCellHeight
+        return x, y
+
+    def __check_float(self, x1, x2, tolerance):
+        # Check if floats are within certain range or tolerance. Simple
+        # predicate function.
+        return abs(x1 - x2) <= tolerance
+
+    def __check_snap(self, input_raster, snaprast_path):
+
+        # Get the xy cell dimensions of both the snap raster and the
+        # input raster.
+        snap_x, snap_y = self.__get_cellsizes(snaprast_path)
+        in_x, in_y = self.__get_cellsizes(input_raster)
+
+        # Determine if cells dimensions wall within tolerance. Needed as
+        # reprojections can slightly skew float cell size,
+        # e.g. 0.6 -> 0.599999...
+        check_x = self.__check_float(snap_x, in_x, 0.0001)
+        check_y = self.__check_float(snap_y, in_y, 0.0001)
+        # If both dimensions fall within tolerance do nothing. If not then
+        # raise error.
+        try:
+            if check_y is False and check_x is False:
+                raise ValueError
+        except ValueError:
+            print("Invlaid snapraster cellsize: The snapraster cell size does \n"
+                  "not match that of the input rasters cellsize.")
+            sys.exit(1)

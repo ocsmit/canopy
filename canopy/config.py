@@ -1,9 +1,7 @@
-import arcpy
 import os
-import sys
 from .templates import config_template
 from configparser import ConfigParser
-import time
+
 
 class Config:
     '''
@@ -107,39 +105,6 @@ class Config:
             self.gen_cfg(config_path)
             self.config = config_path
         self.__reload_cfg()
-
-    def __get_cellsizes(self, input_raster):
-        # Returns a tuple of the x,y cell dimensions of raster
-        x = arcpy.Raster(input_raster).meanCellWidth
-        y = arcpy.Raster(input_raster).meanCellHeight
-        return x, y
-
-    def __check_float(self, x1, x2, tolerance):
-        # Check if floats are within certain range or tolerance. Simple
-        # predicate function.
-        return abs(x1 - x2) <= tolerance
-
-    def __check_snap(self, input_raster):
-
-        # Get the xy cell dimensions of both the snap raster and the
-        # input raster.
-        snap_x, snap_y = self.__get_cellsizes(self.snaprast_path)
-        in_x, in_y = self.__get_cellsizes(input_raster)
-
-        # Determine if cells dimensions wall within tolerance. Needed as
-        # reprojections can slightly skew float cell size,
-        # e.g. 0.6 -> 0.599999...
-        check_x = self.__check_float(snap_x, in_x, 0.0001)
-        check_y = self.__check_float(snap_y, in_y, 0.0001)
-        # If both dimensions fall within tolerance do nothing. If not then
-        # raise error.
-        try:
-            if check_y is False and check_x is False:
-                raise ValueError
-        except ValueError:
-            print("Invlaid snapraster cellsize: The snapraster cell size does \n"
-                  "not match that of the input rasters cellsize.")
-            sys.exit(1)
 
     def gen_cfg(self, config_path):
         '''
