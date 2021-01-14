@@ -445,7 +445,7 @@ def mosaic_clipped_final_tiles(config):
     print('Completed')
 
 @__timed
-def convert_afe_to_canopy_tif():
+def convert_afe_to_canopy_tif(config):
     '''
     This function is a wrapper function that converts AFE outputs to the
     final canopy TIFF file by invoking convert_afe_to_final_tiles(),
@@ -453,9 +453,9 @@ def convert_afe_to_canopy_tif():
     order.
     '''
 
-    convert_afe_to_final_tiles()
-    clip_final_tiles()
-    mosaic_clipped_final_tiles()
+    convert_afe_to_final_tiles(config)
+    clip_final_tiles(config)
+    mosaic_clipped_final_tiles(config)
 
 @__timed
 def correct_inverted_canopy_tif(config, inverted_phyreg_ids):
@@ -831,7 +831,7 @@ def update_gtpoints(config, old_points, phyreg_ids):
                     xy = row2[0]
                     # perform calculate_row_column to get the row and column
                     # of the point
-                    rc = config.__calculate_row_column(xy, ras.extent, res)
+                    rc = __calculate_row_column(xy, ras.extent, res)
                     # update the point, correct inverted region points
                     if inverted is True:
                         row2[1] = 1 - ras_a[rc]
